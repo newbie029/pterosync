@@ -15,12 +15,14 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 
 global $_LANG;
 
-$language = $_SESSION['Language'] ?? 'english';
+$language = basename($_SESSION['Language'] ?? 'english');
+// Always load English first so untranslated keys fall back to English
+include dirname(__FILE__) . '/lang/english.php';
+$englishKeys = $keys;
 // Load language file based on the client's language preference
-if (file_exists(dirname(__FILE__) . '/lang/' . $language . '.php')) {
+if ($language !== 'english' && file_exists(dirname(__FILE__) . '/lang/' . $language . '.php')) {
     include dirname(__FILE__) . '/lang/' . $language . '.php';
-} else {
-    include dirname(__FILE__) . '/lang/english.php'; // Fallback to English
+    $keys = array_merge($englishKeys, $keys);
 }
 $_LANG = array_merge($keys, $_LANG);
 
@@ -1030,6 +1032,7 @@ function pterosync_ClientArea(array $params)
                 'killServer' => 'pteroSyncKillServer',
                 'saveServerVariables' => 'pteroSyncSaveServerVariables',
                 'saveServerStartup' => 'pteroSyncSaveServerStartup',
+                'changePanelPassword' => 'pteroSyncChangePanelPassword',
                 'getState', 'getFtpDetails' => 'pteroSyncServerState',
                 default => false,
             };
@@ -1089,6 +1092,8 @@ function pterosync_ClientArea(array $params)
             'rebootUrl' => $actionUrl . '&modop=custom&a=restartServer',
             'stopUrl' => $actionUrl . '&modop=custom&a=stopServer',
             'killUrl' => $actionUrl . '&modop=custom&a=killServer',
+            'changePanelPasswordUrl' => $actionUrl . '&modop=custom&a=changePanelPassword',
+            'allowPanelPasswordChange' => PteroSyncInstance::get()->enable_client_area_password_changer === true,
             'ftpDetails' => [
                 'username' => $userAttributes['username'] . '.' . $serverData['identifier'],
                 'host' => 'sftp://' . $nodeAttributes['fqdn'] . ':' . $nodeAttributes['daemon_sftp']

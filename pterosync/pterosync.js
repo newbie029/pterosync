@@ -229,6 +229,58 @@ $(document).ready(function () {
         });
     });
 
+    $('#changePanelPasswordForm').on('submit', function (e) {
+        e.preventDefault();
+
+        const form = $(this),
+            button = $('#changePanelPasswordButton'),
+            originalButtonText = button.html(),
+            successBox = form.find('.panel-password-success'),
+            errorBox = form.find('.panel-password-error');
+
+        successBox.hide().empty();
+        errorBox.hide().empty();
+        form.find('.panel-password-field-error').remove();
+        form.find('.border-danger').removeClass('border-danger');
+
+        button.prop('disabled', true)
+            .html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + originalButtonText);
+
+        $.ajax({
+            url: form.attr('action'),
+            type: 'POST',
+            data: form.serialize(),
+            dataType: 'json',
+            success: function (response) {
+                form.find('input[type="password"]').val('');
+                successBox.text(response.message).fadeIn();
+            },
+            error: function (response) {
+                const json = response.responseJSON || {};
+                if (json.errors && json.errors.length) {
+                    json.errors.forEach(function (error) {
+                        $('<div class="panel-password-field-error text-danger"></div>')
+                            .text(error.message)
+                            .insertAfter(form.find('#' + error.input).addClass('border-danger'));
+                    });
+                } else {
+                    errorBox.text(json.message || 'Request failed. Please try again.').fadeIn();
+                }
+            },
+            complete: function () {
+                button.html(originalButtonText).prop('disabled', false);
+            }
+        });
+    });
+
+    $('#changePanelPassword').on('hidden.bs.modal', function () {
+        const form = $('#changePanelPasswordForm');
+        form.find('input[type="password"]').val('');
+        form.find('.panel-password-success, .panel-password-error').hide().empty();
+        form.find('.panel-password-field-error').remove();
+        form.find('.border-danger').removeClass('border-danger');
+    });
+
     disableButtons(currentState, true)
 
     $(document).on('click', '.copy-text', function () {

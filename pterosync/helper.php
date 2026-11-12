@@ -903,6 +903,69 @@ function pteroSyncSaveServerVariables($params, $serverData, $serverState)
     pteroSyncReturnJson($errors, 400);
 }
 
+function pteroSyncChangePanelPassword($params, $serverData, $serverState)
+{
+    global $_LANG;
+
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        pteroSyncreturnJsonMessage('PANEL_PASSWORD_CHANGE_NOT_ALLOWED', 405);
+    }
+
+    if (PteroSyncInstance::get()->enable_client_area_password_changer !== true) {
+        pteroSyncreturnJsonMessage('PANEL_PASSWORD_CHANGE_NOT_ALLOWED', 403);
+    }
+
+    $password = (string)($_POST['panel_password'] ?? '');
+    $confirm = (string)($_POST['panel_password_confirm'] ?? '');
+
+    $errors = [];
+    if (strlen($password) < 8) {
+        $errors[] = ['input' => 'panel_password', 'message' => $_LANG['PANEL_PASSWORD_TOO_SHORT']];
+    }
+    if ($password !== $confirm) {
+        $errors[] = ['input' => 'panel_password_confirm', 'message' => $_LANG['PANEL_PASSWORD_MISMATCH']];
+    }
+    if ($errors) {
+        pteroSyncReturnJson([
+            'errors' => $errors,
+            'message' => $_LANG['PANEL_PASSWORD_CHANGE_FAILED'],
+        ], 422);
+    }
+
+    // Always change the password of the user that owns this server.
+    $userId = $serverData['user'] ?? 0;
+    $userResult = pteroSyncApplicationApi($params, 'users/' . $userId, []);
+    if ($userResult['status_code'] !== 200) {
+        pteroSyncreturnJsonMessage('PANEL_PASSWORD_CHANGE_FAILED', 400);
+    }
+
+    $updateResult = pteroSyncApplicationApi($params, 'users/' . $userResult['attributes']['id'], [
+        'username' => $userResult['attributes']['username'],
+        'email' => $userResult['attributes']['email'],
+        'first_name' => $userResult['attributes']['first_name'],
+        'last_name' => $userResult['attributes']['last_name'],
+        'password' => $password,
+    ], 'PATCH');
+
+    if ($updateResult['status_code'] !== 200) {
+        $response = [
+            'errors' => [],
+            'message' => $_LANG['PANEL_PASSWORD_CHANGE_FAILED'],
+        ];
+        if (isset($updateResult['errors']) && is_array($updateResult['errors'])) {
+            foreach ($updateResult['errors'] as $error) {
+                $response['errors'][] = [
+                    'input' => 'panel_password',
+                    'message' => $error['detail'] ?? $_LANG['PANEL_PASSWORD_CHANGE_FAILED'],
+                ];
+            }
+        }
+        pteroSyncReturnJson($response, 400);
+    }
+
+    pteroSyncreturnJsonMessage('PANEL_PASSWORD_CHANGED', 200);
+}
+
 function pteroSyncSaveServerStartup($params, $serverData, $serverState)
 {
 
