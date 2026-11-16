@@ -582,6 +582,14 @@ function pteroSyncApplyDiskAddon(array $params, int $parentServiceId, array $exc
 
         $serverData = pteroSyncGetServer($params, true);
         if (!$serverData) {
+            if (empty($includeAddonIds)) {
+                // Suspend/Terminate path: parent already gone, nothing left to shrink.
+                logModuleCall("PteroSync-WHMCS", 'DISK ADDON RECOMPUTE SKIPPED', json_encode([
+                    'service_id' => $parentServiceId,
+                    'reason' => 'parent server does not exist',
+                ]), '');
+                return 'success';
+            }
             return 'Parent server is not provisioned yet; retry once the main service is active.';
         }
 
