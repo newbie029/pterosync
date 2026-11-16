@@ -105,6 +105,17 @@ This approach also applies to any environment variable name. For instance, `Play
 
 Useful trick: You can use the | seperator to change the display name of the variable like this: dedicated_ip|Dedicated IP => Will be displayed as "Dedicated IP" but will work correctly.
 
+## Disk Addons
+A product addon can give customers extra disk space on their existing server. The server disk is always the package disk plus all active disk addons, recalculated on every change, so addons survive package upgrades. Example: Package A has 20 GB and the customer buys a 5 GB addon, giving 25 GB. After upgrading to Package B (40 GB) the server has 45 GB. Cancelling or suspending the addon takes its space back.
+
+To set one up in WHMCS:
+1. Go to **Setup** -> **Products/Services** -> **Product Addons** and create a new addon.
+2. On the **Module Settings** tab, select **PteroSync** as the module.
+3. Fill in only the **Disk Space** setting with the extra amount, in the unit set by `disk_as_gb` in `config.json` (GB if `true`, MB otherwise).
+4. Leave **Nest ID** and **Egg ID** empty. An addon with them filled in is treated as a server addon and creates its own server.
+
+Customers can buy several disk addons and they stack. A package with a disk of `0` (unlimited) stays unlimited.
+
 ## Couldn't find any nodes satisfying the request
 This can be caused from any of the following: Wrong location, not enough disk space/CPU/RAM, or no allocations matching the provided criteria.
 

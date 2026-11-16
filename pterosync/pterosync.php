@@ -426,6 +426,10 @@ function pterosync_TestConnection(array $params)
 function pterosync_CreateAccount(array $params)
 {
 
+    if ($params['addonId'] > 0 && pteroSyncGetDiskAddonAmount((int)$params['addonId']) !== null) {
+        return pteroSyncApplyDiskAddon($params, (int)$params['serviceid'], [], [(int)$params['addonId']]);
+    }
+
     //if addonId is not 0 , add it to extrnal_id
     if ($params['addonId'] > 0) {
         $params['serviceid'] = $params['serviceid'] . '.' . $params['addonId'];
@@ -506,6 +510,9 @@ function pterosync_CreateAccount(array $params)
         $id = (string)$params['serviceid'];
         $name = pteroSyncGetOption($params, 'server_name', pteroSyncGenerateUsername() . '_' . $id);
         [$memory, $swap, $disk] = pteroSyncGetMemorySwapAndDisk($params);
+        if (($params['addonId'] ?? 0) == 0) {
+            $disk = pteroSyncComputeTotalDiskMb((int)$disk, pteroSyncGetActiveDiskAddonAmounts((int)$params['serviceid']), (bool)PteroSyncInstance::get()->disk_as_gb);
+        }
 
         $io = pteroSyncGetOption($params, 'io');
         $cpu = pteroSyncGetOption($params, 'cpu');
@@ -706,6 +713,10 @@ function pterosync_CreateAccount(array $params)
 function pterosync_SuspendAccount(array $params)
 {
 
+    if ($params['addonId'] > 0 && pteroSyncGetDiskAddonAmount((int)$params['addonId']) !== null) {
+        return pteroSyncApplyDiskAddon($params, (int)$params['serviceid'], [(int)$params['addonId']], []);
+    }
+
     if ($params['addonId'] > 0) {
         $params['serviceid'] = $params['serviceid'] . '.' . $params['addonId'];
     }
@@ -726,6 +737,10 @@ function pterosync_SuspendAccount(array $params)
 function pterosync_UnsuspendAccount(array $params)
 {
 
+    if ($params['addonId'] > 0 && pteroSyncGetDiskAddonAmount((int)$params['addonId']) !== null) {
+        return pteroSyncApplyDiskAddon($params, (int)$params['serviceid'], [], [(int)$params['addonId']]);
+    }
+
     if ($params['addonId'] > 0) {
         $params['serviceid'] = $params['serviceid'] . '.' . $params['addonId'];
     }
@@ -745,6 +760,10 @@ function pterosync_UnsuspendAccount(array $params)
 
 function pterosync_TerminateAccount(array $params)
 {
+    if ($params['addonId'] > 0 && pteroSyncGetDiskAddonAmount((int)$params['addonId']) !== null) {
+        return pteroSyncApplyDiskAddon($params, (int)$params['serviceid'], [(int)$params['addonId']], []);
+    }
+
     if ($params['addonId'] > 0) {
         $params['serviceid'] = $params['serviceid'] . '.' . $params['addonId'];
     }
@@ -808,6 +827,10 @@ function pterosync_ChangePassword(array $params)
 function pterosync_ChangePackage(array $params)
 {
 
+    if ($params['addonId'] > 0 && pteroSyncGetDiskAddonAmount((int)$params['addonId']) !== null) {
+        return pteroSyncApplyDiskAddon($params, (int)$params['serviceid'], [], [(int)$params['addonId']]);
+    }
+
     if ($params['addonId'] > 0) {
         $params['serviceid'] = $params['serviceid'] . '.' . $params['addonId'];
     }
@@ -819,6 +842,9 @@ function pterosync_ChangePackage(array $params)
         $serverId = $serverData['id'];
 
         [$memory, $swap, $disk] = pteroSyncGetMemorySwapAndDisk($params);
+        if (($params['addonId'] ?? 0) == 0) {
+            $disk = pteroSyncComputeTotalDiskMb((int)$disk, pteroSyncGetActiveDiskAddonAmounts((int)$params['serviceid']), (bool)PteroSyncInstance::get()->disk_as_gb);
+        }
 
         $io = pteroSyncGetOption($params, 'io');
         $cpu = pteroSyncGetOption($params, 'cpu');

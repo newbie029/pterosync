@@ -367,6 +367,166 @@ function pteroSyncClientApi(array $params, $endPoint, array $data = [], $method 
     return pteroSyncApiHandler($method, $data, $curl, $headers, $dontLog, $url);
 }
 
+function pteroSyncComputeTotalDiskMb(int $baseDiskMb, array $addonAmounts, bool $asGb): int
+{
+    // 0 (or less) means unlimited in Pterodactyl; addons must not change that.
+    if ($baseDiskMb <= 0) {
+        return $baseDiskMb;
+    }
+
+    $extra = 0;
+    foreach ($addonAmounts as $amount) {
+        if (!is_numeric($amount) || $amount <= 0) {
+            continue;
+        }
+        $extra += $asGb ? pteroSyncConvertToMB($amount) : $amount;
+    }
+
+    return (int)round($baseDiskMb + $extra);
+}
+
+function pteroSyncConfigOptionNumber(string $key): ?int
+{
+    $position = array_search($key, pterosync_ConfigKeys(), true);
+    return $position === false ? null : $position + 1;
+}
+
+/**
+ * Returns the disk amount (in the configured unit) if the addon is a disk addon
+ * (disk > 0 and both nest_id and egg_id empty), otherwise null.
+ *
+ * $addonInstanceId is a tblhostingaddons.id (the purchased instance, i.e. WHMCS $params['addonId']),
+ * NOT a tbladdons.id. It is resolved to the addon definition id (tblhostingaddons.addonid) here.
+ *
+ * NOTE: the addon module settings schema (tblmodule_configuration, entity_type 'addon')
+ * is UNVERIFIED. All addon settings access lives here so the source can be swapped in one place.
+ */
+function pteroSyncGetDiskAddonAmount(int $addonInstanceId): ?float
+{
+    $definitionId = Capsule::table('tblhostingaddons')->where('id', $addonInstanceId)->value('addonid');
+    if ($definitionId === null || (int)$definitionId <= 0) {
+        return null;
+    }
+
+    $numbers = [];
+    foreach (['disk', 'nest_id', 'egg_id'] as $key) {
+        $numbers[$key] = pteroSyncConfigOptionNumber($key);
+    }
+
+    $rows = Capsule::table('tblmodule_configuration')
+        ->where('entity_type', 'addon')
+        ->where('entity_id', (int)$definitionId)
+        ->whereIn('setting_name', array_map(fn($n) => 'configoption' . $n, $numbers))
+        ->pluck('value', 'setting_name');
+
+    $get = function ($key) use ($rows, $numbers) {
+        $value = $rows['configoption' . $numbers[$key]] ?? '';
+        return is_string($value) ? trim($value) : $value;
+    };
+
+    $disk = $get('disk');
+    if (!is_numeric($disk) || (float)$disk <= 0) {
+        return null;
+    }
+    if ($get('nest_id') !== '' && $get('nest_id') !== null) {
+        return null;
+    }
+    if ($get('egg_id') !== '' && $get('egg_id') !== null) {
+        return null;
+    }
+
+    return (float)$disk;
+}
+
+function pteroSyncGetActiveDiskAddonAmounts(int $serviceId, array $excludeAddonIds = [], array $includeAddonIds = []): array
+{
+    $excludeAddonIds = array_map('intval', $excludeAddonIds);
+    $includeAddonIds = array_map('intval', $includeAddonIds);
+
+    $addonIds = Capsule::table('tblhostingaddons')
+        ->where('hostingid', $serviceId)
+        ->where(function ($query) use ($includeAddonIds) {
+            $query->where('status', 'Active');
+            if (!empty($includeAddonIds)) {
+                $query->orWhereIn('id', $includeAddonIds);
+            }
+        })
+        ->pluck('id');
+
+    $amounts = [];
+    foreach ($addonIds as $addonId) {
+        $addonId = (int)$addonId;
+        if (in_array($addonId, $excludeAddonIds, true)) {
+            continue;
+        }
+        $amount = pteroSyncGetDiskAddonAmount($addonId);
+        if ($amount !== null) {
+            $amounts[] = $amount;
+        }
+    }
+
+    return $amounts;
+}
+
+function pteroSyncGetServiceBaseDiskMb(int $serviceId): int
+{
+    $disk = null;
+
+    // 1. Configurable option named "disk" on the service (same precedence as pteroSyncGetOption).
+    $option = Capsule::table('tblhostingconfigoptions as hco')
+        ->join('tblproductconfigoptions as pco', 'pco.id', '=', 'hco.configid')
+        ->leftJoin('tblproductconfigoptionssub as sub', 'sub.id', '=', 'hco.optionid')
+        ->where('hco.relid', $serviceId)
+        ->where(function ($query) {
+            $query->where('pco.optionname', 'disk')->orWhere('pco.optionname', 'like', 'disk|%');
+        })
+        ->select('pco.optiontype', 'hco.qty', 'sub.optionname as sub_name')
+        ->first();
+
+    if ($option) {
+        // Quantity options (type 4) store the value in qty, others in the selected sub option name.
+        $raw = (int)$option->optiontype === 4 ? $option->qty : explode('|', (string)$option->sub_name)[0];
+        $raw = trim((string)$raw);
+        if ($raw !== '') {
+            $disk = $raw;
+        }
+    }
+
+    // 2. Custom field named "disk" on the service.
+    if ($disk === null) {
+        $custom = Capsule::table('tblcustomfieldsvalues as cfv')
+            ->join('tblcustomfields as cf', 'cf.id', '=', 'cfv.fieldid')
+            ->where('cfv.relid', $serviceId)
+            ->where('cf.type', 'product')
+            ->where(function ($query) {
+                $query->where('cf.fieldname', 'disk')->orWhere('cf.fieldname', 'like', 'disk|%');
+            })
+            ->value('cfv.value');
+        if ($custom !== null && trim((string)$custom) !== '') {
+            $disk = trim((string)$custom);
+        }
+    }
+
+    // 3. Product module setting.
+    if ($disk === null) {
+        $number = pteroSyncConfigOptionNumber('disk');
+        $value = Capsule::table('tblhosting as h')
+            ->join('tblproducts as p', 'p.id', '=', 'h.packageid')
+            ->where('h.id', $serviceId)
+            ->value('p.configoption' . $number);
+        if ($value !== null && trim((string)$value) !== '') {
+            $disk = trim((string)$value);
+        }
+    }
+
+    $disk = (int)$disk;
+    if (PteroSyncInstance::get()->disk_as_gb) {
+        $disk = (int)pteroSyncConvertToMB($disk);
+    }
+
+    return $disk;
+}
+
 function pteroSyncGetMemorySwapAndDisk($params)
 {
 
@@ -412,6 +572,67 @@ function pteroSyncGetServer(array $params, $raw = false, $include = false)
         throw new Exception('Failed to get server, panel errored. Check panel logs for more info.');
     }
     return false;
+}
+
+function pteroSyncSetServerDiskMb(array $params, array $serverData, int $diskMb): void
+{
+    $limits = $serverData['limits'] ?? [];
+    $featureLimits = $serverData['feature_limits'] ?? [];
+
+    // Only PATCH the build; never touch /startup so customer-set variables survive.
+    $updateData = [
+        'allocation' => $serverData['allocation'],
+        'memory' => (int)($limits['memory'] ?? 0),
+        'swap' => (int)($limits['swap'] ?? 0),
+        'io' => (int)($limits['io'] ?? 500),
+        'cpu' => (int)($limits['cpu'] ?? 0),
+        'disk' => $diskMb,
+        'threads' => $limits['threads'] ?? null,
+        'oom_disabled' => (bool)($limits['oom_disabled'] ?? false),
+        'feature_limits' => $featureLimits,
+    ];
+
+    $result = pteroSyncApplicationApi($params, 'servers/' . $serverData['id'] . '/build', $updateData, 'PATCH');
+    if ($result['status_code'] !== 200) {
+        throw new Exception('Failed to update disk of the server, received error code: ' . $result['status_code'] . '. Enable module debug log for more info.');
+    }
+}
+
+function pteroSyncApplyDiskAddon(array $params, int $parentServiceId, array $excludeAddonIds, array $includeAddonIds): string
+{
+    try {
+        $params['serviceid'] = $parentServiceId;
+
+        $serverData = pteroSyncGetServer($params, true);
+        if (!$serverData) {
+            if (empty($includeAddonIds)) {
+                // Suspend/Terminate path: parent already gone, nothing left to shrink.
+                logModuleCall("PteroSync-WHMCS", 'DISK ADDON RECOMPUTE SKIPPED', json_encode([
+                    'service_id' => $parentServiceId,
+                    'reason' => 'parent server does not exist',
+                ]), '');
+                return 'success';
+            }
+            return 'Parent server is not provisioned yet; retry once the main service is active.';
+        }
+
+        $baseMb = pteroSyncGetServiceBaseDiskMb($parentServiceId);
+        $amounts = pteroSyncGetActiveDiskAddonAmounts($parentServiceId, $excludeAddonIds, $includeAddonIds);
+        $total = pteroSyncComputeTotalDiskMb($baseMb, $amounts, (bool)PteroSyncInstance::get()->disk_as_gb);
+
+        logModuleCall("PteroSync-WHMCS", 'DISK ADDON RECOMPUTE', json_encode([
+            'service_id' => $parentServiceId,
+            'base_disk_mb' => $baseMb,
+            'addon_amounts' => $amounts,
+            'total_disk_mb' => $total,
+        ]), '');
+
+        pteroSyncSetServerDiskMb($params, $serverData, $total);
+    } catch (Exception $err) {
+        return $err->getMessage();
+    }
+
+    return 'success';
 }
 
 function pteroSyncGetServerVariables(array $params, $serverId)
