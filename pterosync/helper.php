@@ -551,6 +551,59 @@ function pteroSyncGetServer(array $params, $raw = false, $include = false)
     return false;
 }
 
+function pteroSyncSetServerDiskMb(array $params, array $serverData, int $diskMb): void
+{
+    $limits = $serverData['limits'] ?? [];
+    $featureLimits = $serverData['feature_limits'] ?? [];
+
+    // Only PATCH the build; never touch /startup so customer-set variables survive.
+    $updateData = [
+        'allocation' => $serverData['allocation'],
+        'memory' => (int)($limits['memory'] ?? 0),
+        'swap' => (int)($limits['swap'] ?? 0),
+        'io' => (int)($limits['io'] ?? 500),
+        'cpu' => (int)($limits['cpu'] ?? 0),
+        'disk' => $diskMb,
+        'threads' => $limits['threads'] ?? null,
+        'oom_disabled' => (bool)($limits['oom_disabled'] ?? false),
+        'feature_limits' => $featureLimits,
+    ];
+
+    $result = pteroSyncApplicationApi($params, 'servers/' . $serverData['id'] . '/build', $updateData, 'PATCH');
+    if ($result['status_code'] !== 200) {
+        throw new Exception('Failed to update disk of the server, received error code: ' . $result['status_code'] . '. Enable module debug log for more info.');
+    }
+}
+
+function pteroSyncApplyDiskAddon(array $params, int $parentServiceId, array $excludeAddonIds, array $includeAddonIds): string
+{
+    try {
+        $params['serviceid'] = $parentServiceId;
+
+        $serverData = pteroSyncGetServer($params, true);
+        if (!$serverData) {
+            return 'Parent server is not provisioned yet; retry once the main service is active.';
+        }
+
+        $baseMb = pteroSyncGetServiceBaseDiskMb($parentServiceId);
+        $amounts = pteroSyncGetActiveDiskAddonAmounts($parentServiceId, $excludeAddonIds, $includeAddonIds);
+        $total = pteroSyncComputeTotalDiskMb($baseMb, $amounts, (bool)PteroSyncInstance::get()->disk_as_gb);
+
+        logModuleCall("PteroSync-WHMCS", 'DISK ADDON RECOMPUTE', json_encode([
+            'service_id' => $parentServiceId,
+            'base_disk_mb' => $baseMb,
+            'addon_amounts' => $amounts,
+            'total_disk_mb' => $total,
+        ]), '');
+
+        pteroSyncSetServerDiskMb($params, $serverData, $total);
+    } catch (Exception $err) {
+        return $err->getMessage();
+    }
+
+    return 'success';
+}
+
 function pteroSyncGetServerVariables(array $params, $serverId)
 {
     $data = pteroSyncClientApi($params, 'servers/' . $serverId . '/startup', [], 'GET', true);
