@@ -367,6 +367,24 @@ function pteroSyncClientApi(array $params, $endPoint, array $data = [], $method 
     return pteroSyncApiHandler($method, $data, $curl, $headers, $dontLog, $url);
 }
 
+function pteroSyncComputeTotalDiskMb(int $baseDiskMb, array $addonAmounts, bool $asGb): int
+{
+    // 0 (or less) means unlimited in Pterodactyl; addons must not change that.
+    if ($baseDiskMb <= 0) {
+        return $baseDiskMb;
+    }
+
+    $extra = 0;
+    foreach ($addonAmounts as $amount) {
+        if (!is_numeric($amount) || $amount <= 0) {
+            continue;
+        }
+        $extra += $asGb ? pteroSyncConvertToMB($amount) : $amount;
+    }
+
+    return (int)round($baseDiskMb + $extra);
+}
+
 function pteroSyncGetMemorySwapAndDisk($params)
 {
 
