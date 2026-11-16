@@ -385,6 +385,125 @@ function pteroSyncComputeTotalDiskMb(int $baseDiskMb, array $addonAmounts, bool 
     return (int)round($baseDiskMb + $extra);
 }
 
+function pteroSyncConfigOptionNumber(string $key): ?int
+{
+    $position = array_search($key, pterosync_ConfigKeys(), true);
+    return $position === false ? null : $position + 1;
+}
+
+/**
+ * Returns the disk amount (in the configured unit) if the addon is a disk addon
+ * (disk > 0 and both nest_id and egg_id empty), otherwise null.
+ *
+ * NOTE: the addon module settings schema (tblmodule_configuration, entity_type 'addon')
+ * is UNVERIFIED. All addon settings access lives here so the source can be swapped in one place.
+ */
+function pteroSyncGetDiskAddonAmount(int $addonId): ?float
+{
+    $numbers = [];
+    foreach (['disk', 'nest_id', 'egg_id'] as $key) {
+        $numbers[$key] = pteroSyncConfigOptionNumber($key);
+    }
+
+    $rows = Capsule::table('tblmodule_configuration')
+        ->where('entity_type', 'addon')
+        ->where('entity_id', $addonId)
+        ->whereIn('setting_name', array_map(fn($n) => 'configoption' . $n, $numbers))
+        ->pluck('value', 'setting_name');
+
+    $get = function ($key) use ($rows, $numbers) {
+        $value = $rows['configoption' . $numbers[$key]] ?? '';
+        return is_string($value) ? trim($value) : $value;
+    };
+
+    $disk = $get('disk');
+    if (!is_numeric($disk) || (float)$disk <= 0) {
+        return null;
+    }
+    if ($get('nest_id') !== '' && $get('nest_id') !== null) {
+        return null;
+    }
+    if ($get('egg_id') !== '' && $get('egg_id') !== null) {
+        return null;
+    }
+
+    return (float)$disk;
+}
+
+function pteroSyncGetActiveDiskAddonAmounts(int $serviceId, array $excludeAddonIds = [], array $includeAddonIds = []): array
+{
+    $excludeAddonIds = array_map('intval', $excludeAddonIds);
+    $includeAddonIds = array_map('intval', $includeAddonIds);
+
+    $addonIds = Capsule::table('tblhostingaddons')
+        ->where('hostingid', $serviceId)
+        ->where(function ($query) use ($includeAddonIds) {
+            $query->where('status', 'Active');
+            if (!empty($includeAddonIds)) {
+                $query->orWhereIn('id', $includeAddonIds);
+            }
+        })
+        ->pluck('id');
+
+    $amounts = [];
+    foreach ($addonIds as $addonId) {
+        $addonId = (int)$addonId;
+        if (in_array($addonId, $excludeAddonIds, true)) {
+            continue;
+        }
+        $amount = pteroSyncGetDiskAddonAmount($addonId);
+        if ($amount !== null) {
+            $amounts[] = $amount;
+        }
+    }
+
+    return $amounts;
+}
+
+function pteroSyncGetServiceBaseDiskMb(int $serviceId): int
+{
+    $disk = null;
+
+    // 1. Configurable option named "disk" on the service (same precedence as pteroSyncGetOption).
+    $option = Capsule::table('tblhostingconfigoptions as hco')
+        ->join('tblproductconfigoptions as pco', 'pco.id', '=', 'hco.configid')
+        ->leftJoin('tblproductconfigoptionssub as sub', 'sub.id', '=', 'hco.optionid')
+        ->where('hco.relid', $serviceId)
+        ->where(function ($query) {
+            $query->where('pco.optionname', 'disk')->orWhere('pco.optionname', 'like', 'disk|%');
+        })
+        ->select('pco.optiontype', 'hco.qty', 'sub.optionname as sub_name')
+        ->first();
+
+    if ($option) {
+        // Quantity options (type 4) store the value in qty, others in the selected sub option name.
+        $raw = (int)$option->optiontype === 4 ? $option->qty : explode('|', (string)$option->sub_name)[0];
+        $raw = trim((string)$raw);
+        if ($raw !== '') {
+            $disk = $raw;
+        }
+    }
+
+    // 2. Product module setting.
+    if ($disk === null) {
+        $number = pteroSyncConfigOptionNumber('disk');
+        $value = Capsule::table('tblhosting as h')
+            ->join('tblproducts as p', 'p.id', '=', 'h.packageid')
+            ->where('h.id', $serviceId)
+            ->value('p.configoption' . $number);
+        if ($value !== null && trim((string)$value) !== '') {
+            $disk = trim((string)$value);
+        }
+    }
+
+    $disk = (int)$disk;
+    if (PteroSyncInstance::get()->disk_as_gb) {
+        $disk = (int)pteroSyncConvertToMB($disk);
+    }
+
+    return $disk;
+}
+
 function pteroSyncGetMemorySwapAndDisk($params)
 {
 
