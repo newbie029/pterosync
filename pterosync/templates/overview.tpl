@@ -71,6 +71,13 @@
                 <i class="fas fa-file-upload"></i>
                 {$LANG.FTP_DETAILS}
             </button>
+            {if $allowPanelPasswordChange}
+                <button type="button" class="btn btn-primary mt-2" data-toggle="modal"
+                        data-target="#changePanelPassword">
+                    <i class="fas fa-key"></i>
+                    {$LANG.CHANGE_PANEL_PASSWORD}
+                </button>
+            {/if}
             <!-- The modal -->
             <div class="modal fade" id="ftpDetails" tabindex="-1" role="dialog" aria-labelledby="modalLabel"
                  aria-hidden="true">
@@ -119,6 +126,55 @@
                 </div>
             </div>
 
+            {if $allowPanelPasswordChange}
+                <div class="modal fade" id="changePanelPassword" tabindex="-1" role="dialog"
+                     aria-labelledby="changePanelPasswordLabel" aria-hidden="true">
+                    <div class="modal-dialog" role="document">
+                        <div class="modal-content">
+                            <form method="post" action="{$changePanelPasswordUrl}" id="changePanelPasswordForm"
+                                  autocomplete="off">
+                                <input type="hidden" name="token" value="{$token}">
+                                <div class="modal-header">
+                                    <h4 class="modal-title" id="changePanelPasswordLabel">
+                                        {$LANG.CHANGE_PANEL_PASSWORD}
+                                    </h4>
+                                </div>
+                                <div class="modal-body text-left">
+                                    <div class="alert alert-info" role="alert">
+                                        {$LANG.PANEL_PASSWORD_INFORMATION}
+                                    </div>
+                                    <div class="alert alert-success panel-password-success" style="display: none;"></div>
+                                    <div class="alert alert-danger panel-password-error" style="display: none;"></div>
+                                    <div class="form-group mt-2">
+                                        <label for="panel_password" class="form-label">
+                                            {$LANG.PANEL_PASSWORD_NEW}
+                                        </label>
+                                        <input type="password" class="form-control" name="panel_password"
+                                               id="panel_password" minlength="8" autocomplete="new-password"
+                                               required>
+                                    </div>
+                                    <div class="form-group mt-2">
+                                        <label for="panel_password_confirm" class="form-label">
+                                            {$LANG.PANEL_PASSWORD_CONFIRM}
+                                        </label>
+                                        <input type="password" class="form-control" name="panel_password_confirm"
+                                               id="panel_password_confirm" minlength="8"
+                                               autocomplete="new-password" required>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-default" data-dismiss="modal">
+                                        {$LANG.close}
+                                    </button>
+                                    <button type="submit" class="btn btn-primary" id="changePanelPasswordButton">
+                                        <i class="fas fa-key"></i> {$LANG.PANEL_PASSWORD_SAVE}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            {/if}
         </div>
     {/if}
 
