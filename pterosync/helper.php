@@ -395,11 +395,19 @@ function pteroSyncConfigOptionNumber(string $key): ?int
  * Returns the disk amount (in the configured unit) if the addon is a disk addon
  * (disk > 0 and both nest_id and egg_id empty), otherwise null.
  *
+ * $addonInstanceId is a tblhostingaddons.id (the purchased instance, i.e. WHMCS $params['addonId']),
+ * NOT a tbladdons.id. It is resolved to the addon definition id (tblhostingaddons.addonid) here.
+ *
  * NOTE: the addon module settings schema (tblmodule_configuration, entity_type 'addon')
  * is UNVERIFIED. All addon settings access lives here so the source can be swapped in one place.
  */
-function pteroSyncGetDiskAddonAmount(int $addonId): ?float
+function pteroSyncGetDiskAddonAmount(int $addonInstanceId): ?float
 {
+    $definitionId = Capsule::table('tblhostingaddons')->where('id', $addonInstanceId)->value('addonid');
+    if ($definitionId === null || (int)$definitionId <= 0) {
+        return null;
+    }
+
     $numbers = [];
     foreach (['disk', 'nest_id', 'egg_id'] as $key) {
         $numbers[$key] = pteroSyncConfigOptionNumber($key);
@@ -407,7 +415,7 @@ function pteroSyncGetDiskAddonAmount(int $addonId): ?float
 
     $rows = Capsule::table('tblmodule_configuration')
         ->where('entity_type', 'addon')
-        ->where('entity_id', $addonId)
+        ->where('entity_id', (int)$definitionId)
         ->whereIn('setting_name', array_map(fn($n) => 'configoption' . $n, $numbers))
         ->pluck('value', 'setting_name');
 
@@ -484,7 +492,22 @@ function pteroSyncGetServiceBaseDiskMb(int $serviceId): int
         }
     }
 
-    // 2. Product module setting.
+    // 2. Custom field named "disk" on the service.
+    if ($disk === null) {
+        $custom = Capsule::table('tblcustomfieldsvalues as cfv')
+            ->join('tblcustomfields as cf', 'cf.id', '=', 'cfv.fieldid')
+            ->where('cfv.relid', $serviceId)
+            ->where('cf.type', 'product')
+            ->where(function ($query) {
+                $query->where('cf.fieldname', 'disk')->orWhere('cf.fieldname', 'like', 'disk|%');
+            })
+            ->value('cfv.value');
+        if ($custom !== null && trim((string)$custom) !== '') {
+            $disk = trim((string)$custom);
+        }
+    }
+
+    // 3. Product module setting.
     if ($disk === null) {
         $number = pteroSyncConfigOptionNumber('disk');
         $value = Capsule::table('tblhosting as h')
